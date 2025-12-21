@@ -1,108 +1,352 @@
-# PowerShell Temizlik Betiği v2.2 🚀
-# Bu betik, sisteminizdeki geçici, önbellek ve gereksiz dosyaları otomatik olarak temizler.
+#Requires -RunAsAdministrator
+<#
+.SYNOPSIS
+    Gelişmiş Windows Sistem Temizlik Betiği v3.0 🚀
+    
+.DESCRIPTION
+    Güvenli ve kapsamlı sistem temizliği yapar.
+    - Detaylı loglama
+    - Disk alanı hesaplama
+    - Kullanıcı onayı
+    - Servis yönetimi
+    - Tarayıcı kontrolleri
+    
+.NOTES
+    Yazar: Barış PEKALP (İyileştirilmiş Versiyon)
+    Versiyon: 3.0
+    Gereksinim: PowerShell 5.1+, Yönetici Yetkisi
+#>
 
-# Yönetici yetkisi kontrolü
-# Bu betiği çalıştırabilmek için yönetici yetkileri gereklidir.
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "Bu betiği çalıştırabilmek için yönetici yetkileri gereklidir." -ForegroundColor Red
-    Write-Host "Lütfen betiği yönetici olarak yeniden başlatın." -ForegroundColor Red
-    Start-Sleep -Seconds 5
-    exit
+# ============================================================================
+# YAPILANDIRMA ve GLOBAL DEĞİŞKENLER
+# ============================================================================
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+# İstatistikler
+$script:TotalFilesDeleted = 0
+$script:TotalSpaceFreed = 0
+$script:StartTime = Get-Date
+$script:LogFile = "$env:TEMP\CleanupLog_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+
+# Renkler
+$Colors = @{
+    Success = "Green"
+    Warning = "Yellow"
+    Error = "Red"
+    Info = "Cyan"
+    Header = "Magenta"
 }
 
-Write-Host "================================================================================" -ForegroundColor Green
-Write-Host "=== Geçici ve Gereksiz Dosyaları Temizleme Betiği Başlıyor! ✨                ===" -ForegroundColor Green
-Write-Host "================================================================================" -ForegroundColor Green
-Write-Host "Lütfen betiğin çalışması sırasında sabırlı olun, bu biraz zaman alabilir..." -ForegroundColor Yellow
+# ============================================================================
+# YARDIMCI FONKSİYONLAR
+# ============================================================================
 
-# Temizlenecek Ana Yollar 📂
-$pathsToClean = @(
-    "$env:TEMP",                 # Kullanıcıya özel geçici dosyalar
-    "$env:WINDIR\Temp",          # Sistem geçici dosyaları
-    "$env:LOCALAPPDATA\Temp",    # Kullanıcıya özel yerel geçici dosyalar
-    "$env:WINDIR\Prefetch",      # Prefetch dosyaları (dikkatli olun, bazen performansı düşürebilir)
-    "$env:APPDATA\Microsoft\Windows\Recent", # Son kullanılan dosyalar (kısayollarını siler)
-    "$env:LOCALAPPDATA\Microsoft\Windows\WebCache", # Edge/IE WebCache (tarayıcı önbelleği)
-    "$env:ProgramData\Microsoft\Windows\WER\ReportArchive", # Windows Hata Raporlama Arşivi
-    "$env:ProgramData\Microsoft\Windows\WER\Temp",         # Windows Hata Raporlama Geçici
-    "C:\Windows\SoftwareDistribution\Download" # Windows Update geçici dosyaları
-)
-
-# Tarayıcı Önbellekleri ve Günlükleri (Varsa) 🌐
-$browserCachePaths = @(
-    "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache",
-    "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache",
-    "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache",
-    "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Code Cache",
-    "$env:APPDATA\Mozilla\Firefox\Profiles\*\cache2",
-    "$env:APPDATA\Mozilla\Firefox\Profiles\*\startupCache",
-    "$env:LOCALAPPDATA\Opera Software\Opera Stable\Cache",
-    "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\Default\Cache"
-)
-
-# Dosyaları ve Klasörleri Silme Fonksiyonu
-function Remove-Items {
+function Write-Log {
     param(
-        [string[]]$Paths,
-        [string]$ItemType,
-        [string]$Emoji
+        [string]$Message,
+        [string]$Level = "INFO"
     )
-    foreach ($path in $Paths) {
-        if (Test-Path $path) {
-            # Satır boyunca uzanan başlık ve emoji
-            $message = "Temizleniyor: $($path) ($ItemType) $Emoji"
-            $line = "=" * 80
-            Write-Host "`n$line" -ForegroundColor DarkGreen
-            Write-Host "$message" -ForegroundColor DarkGreen
-            Write-Host "$line`n" -ForegroundColor DarkGreen
-            
-            try {
-                # Klasörü ve içindeki tüm öğeleri sil
-                Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue -Confirm:$false
-                
-                # Klasör silindikten sonra tekrar oluştur (eğer yoksa)
-                if (-not (Test-Path $path)) {
-                    New-Item -Path $path -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
-                    Write-Host "Klasör yeniden oluşturuldu: $path ✅" -ForegroundColor Gray
-                }
-            }
-            catch {
-                Write-Host "Hata oluştu: $_" -ForegroundColor Red
-            }
-        } else {
-            Write-Host "--- Atlanıyor (yol bulunamadı): $($path) ($ItemType) 🤷‍♀️ ---" -ForegroundColor DarkYellow
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "[$timestamp] [$Level] $Message"
+    Add-Content -Path $script:LogFile -Value $logEntry
+    
+    switch ($Level) {
+        "SUCCESS" { Write-Host $Message -ForegroundColor $Colors.Success }
+        "WARNING" { Write-Host $Message -ForegroundColor $Colors.Warning }
+        "ERROR"   { Write-Host $Message -ForegroundColor $Colors.Error }
+        default   { Write-Host $Message -ForegroundColor $Colors.Info }
+    }
+}
+
+function Write-Banner {
+    param([string]$Text, [string]$Color = "Cyan")
+    $line = "=" * 80
+    Write-Host "`n$line" -ForegroundColor $Color
+    Write-Host $Text -ForegroundColor $Color
+    Write-Host "$line`n" -ForegroundColor $Color
+}
+
+function Get-FolderSize {
+    param([string]$Path)
+    
+    if (Test-Path $Path) {
+        try {
+            $size = (Get-ChildItem -Path $Path -Recurse -File -ErrorAction SilentlyContinue | 
+                     Measure-Object -Property Length -Sum).Sum
+            return $size
+        }
+        catch {
+            return 0
+        }
+    }
+    return 0
+}
+
+function Format-FileSize {
+    param([long]$Size)
+    
+    if ($Size -gt 1TB) { return "{0:N2} TB" -f ($Size / 1TB) }
+    if ($Size -gt 1GB) { return "{0:N2} GB" -f ($Size / 1GB) }
+    if ($Size -gt 1MB) { return "{0:N2} MB" -f ($Size / 1MB) }
+    if ($Size -gt 1KB) { return "{0:N2} KB" -f ($Size / 1KB) }
+    return "{0:N2} Bytes" -f $Size
+}
+
+function Stop-BrowserProcesses {
+    $browsers = @("chrome", "firefox", "msedge", "opera", "brave", "iexplore")
+    $stoppedProcesses = @()
+    
+    foreach ($browser in $browsers) {
+        $processes = Get-Process -Name $browser -ErrorAction SilentlyContinue
+        if ($processes) {
+            Write-Log "⏸️  $browser kapatılıyor..." "WARNING"
+            $processes | Stop-Process -Force -ErrorAction SilentlyContinue
+            $stoppedProcesses += $browser
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    
+    if ($stoppedProcesses.Count -gt 0) {
+        Write-Log "✅ Kapatılan tarayıcılar: $($stoppedProcesses -join ', ')" "SUCCESS"
+    }
+}
+
+function Stop-WindowsUpdateService {
+    try {
+        $service = Get-Service -Name wuauserv -ErrorAction SilentlyContinue
+        if ($service -and $service.Status -eq "Running") {
+            Write-Log "⏸️  Windows Update servisi durduruluyor..." "INFO"
+            Stop-Service -Name wuauserv -Force -ErrorAction Stop
+            Start-Sleep -Seconds 2
+            Write-Log "✅ Windows Update servisi durduruldu" "SUCCESS"
+            return $true
+        }
+    }
+    catch {
+        Write-Log "⚠️  Windows Update servisi durdurulamadı: $_" "WARNING"
+        return $false
+    }
+    return $false
+}
+
+function Start-WindowsUpdateService {
+    param([bool]$WasStopped)
+    
+    if ($WasStopped) {
+        try {
+            Write-Log "▶️  Windows Update servisi başlatılıyor..." "INFO"
+            Start-Service -Name wuauserv -ErrorAction Stop
+            Write-Log "✅ Windows Update servisi başlatıldı" "SUCCESS"
+        }
+        catch {
+            Write-Log "⚠️  Windows Update servisi başlatılamadı: $_" "WARNING"
         }
     }
 }
 
-# Ana Temizlik İşlemleri
-Remove-Items -Paths $pathsToClean -ItemType "Geçici ve Sistem Dosyaları" -Emoji "🧹"
-Remove-Items -Paths $browserCachePaths -ItemType "Tarayıcı Önbelleği" -Emoji "🌐"
+function Remove-ItemsSafely {
+    param(
+        [string[]]$Paths,
+        [string]$Category,
+        [string]$Emoji = "🧹"
+    )
+    
+    $categorySize = 0
+    $categoryFiles = 0
+    
+    foreach ($path in $Paths) {
+        # Wildcard desteği
+        $expandedPaths = @()
+        if ($path -like "*`**") {
+            $expandedPaths = Get-Item -Path $path -ErrorAction SilentlyContinue
+        } else {
+            if (Test-Path $path) {
+                $expandedPaths = @($path)
+            }
+        }
+        
+        foreach ($expandedPath in $expandedPaths) {
+            if (Test-Path $expandedPath) {
+                try {
+                    # Boyut hesapla
+                    $sizeBefore = Get-FolderSize -Path $expandedPath
+                    $fileCount = (Get-ChildItem -Path $expandedPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
+                    
+                    Write-Log "$Emoji Temizleniyor: $expandedPath ($(Format-FileSize $sizeBefore), $fileCount dosya)" "INFO"
+                    
+                    # Dosyaları sil
+                    Remove-Item -Path "$expandedPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+                    
+                    $categorySize += $sizeBefore
+                    $categoryFiles += $fileCount
+                    
+                    Write-Log "  ✅ Temizlendi: $(Format-FileSize $sizeBefore)" "SUCCESS"
+                }
+                catch {
+                    Write-Log "  ❌ Hata: $_" "ERROR"
+                }
+            }
+        }
+    }
+    
+    $script:TotalSpaceFreed += $categorySize
+    $script:TotalFilesDeleted += $categoryFiles
+    
+    if ($categorySize -gt 0) {
+        Write-Log "📊 $Category Toplamı: $(Format-FileSize $categorySize), $categoryFiles dosya`n" "SUCCESS"
+    }
+}
 
-# Geri Dönüşüm Kutusunu Boşaltma (Tüm Sürücüler İçin)
-$line = "=" * 80
-Write-Host "`n$line" -ForegroundColor DarkGreen
-Write-Host "Geri Dönüşüm Kutusu boşaltılıyor... 🗑️" -ForegroundColor DarkGreen
-Write-Host "$line`n" -ForegroundColor DarkGreen
+# ============================================================================
+# ANA PROGRAM
+# ============================================================================
+
+Clear-Host
+Write-Banner "🚀 WINDOWS SİSTEM TEMİZLİK ARACI v3.0 🚀" "Magenta"
+
+Write-Log "📝 Log dosyası: $script:LogFile" "INFO"
+Write-Log "⏰ Başlangıç zamanı: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')" "INFO"
+
+# Kullanıcı Onayı
+Write-Host "`n⚠️  Bu işlem aşağıdaki temizlikleri yapacaktır:" -ForegroundColor Yellow
+Write-Host "   • Geçici sistem ve kullanıcı dosyaları" -ForegroundColor Gray
+Write-Host "   • Tarayıcı önbellekleri (Tarayıcılar kapatılacak!)" -ForegroundColor Gray
+Write-Host "   • Windows Update geçici dosyaları" -ForegroundColor Gray
+Write-Host "   • Prefetch dosyaları (İsteğe bağlı)" -ForegroundColor Gray
+Write-Host "   • Geri dönüşüm kutusu" -ForegroundColor Gray
+Write-Host "   • Windows hata raporları`n" -ForegroundColor Gray
+
+$confirm = Read-Host "Devam etmek istiyor musunuz? (E/H)"
+if ($confirm -notmatch '^[EeYy]') {
+    Write-Log "❌ İşlem kullanıcı tarafından iptal edildi" "WARNING"
+    exit
+}
+
+# Prefetch Onayı
+$cleanPrefetch = Read-Host "`n⚠️  Prefetch dosyalarını temizlemek bazı uygulamaların açılış süresini geçici olarak etikleybilir. Yine de temizlensin mi? (E/H)"
+$includePrefetch = $cleanPrefetch -match '^[EeYy]'
+
+# ============================================================================
+# TEMİZLİK İŞLEMLERİ
+# ============================================================================
+
+Write-Banner "🧹 TEMİZLİK İŞLEMLERİ BAŞLIYOR" "Cyan"
+
+# 1. Tarayıcıları Kapat
+Write-Banner "🌐 TARAYICILAR KAPATILIYOR" "Yellow"
+Stop-BrowserProcesses
+
+# 2. Geçici Dosyalar
+Write-Banner "📁 GEÇİCİ DOSYALAR TEMİZLENİYOR" "Cyan"
+$tempPaths = @(
+    "$env:TEMP",
+    "$env:WINDIR\Temp",
+    "$env:LOCALAPPDATA\Temp"
+)
+Remove-ItemsSafely -Paths $tempPaths -Category "Geçici Dosyalar" -Emoji "🗑️"
+
+# 3. Prefetch (isteğe bağlı)
+if ($includePrefetch) {
+    Write-Banner "⚡ PREFETCH DOSYALARI TEMİZLENİYOR" "Cyan"
+    Remove-ItemsSafely -Paths @("$env:WINDIR\Prefetch") -Category "Prefetch" -Emoji "⚡"
+}
+
+# 4. Son Kullanılan Dosyalar
+Write-Banner "📋 SON KULLANILAN DOSYALAR TEMİZLENİYOR" "Cyan"
+Remove-ItemsSafely -Paths @("$env:APPDATA\Microsoft\Windows\Recent") -Category "Son Kullanılanlar" -Emoji "📋"
+
+# 5. Tarayıcı Önbellekleri
+Write-Banner "🌐 TARAYICI ÖNBELLEKLERİ TEMİZLENİYOR" "Cyan"
+$browserPaths = @(
+    "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache",
+    "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache",
+    "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache",
+    "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Code Cache",
+    "$env:LOCALAPPDATA\Opera Software\Opera Stable\Cache",
+    "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\Default\Cache"
+)
+
+# Firefox profilleri için özel işlem
+$firefoxProfiles = Get-ChildItem -Path "$env:APPDATA\Mozilla\Firefox\Profiles" -Directory -ErrorAction SilentlyContinue
+foreach ($profile in $firefoxProfiles) {
+    $browserPaths += "$($profile.FullName)\cache2"
+    $browserPaths += "$($profile.FullName)\startupCache"
+}
+
+Remove-ItemsSafely -Paths $browserPaths -Category "Tarayıcı Önbellekleri" -Emoji "🌐"
+
+# 6. Windows Hata Raporları
+Write-Banner "📊 WINDOWS HATA RAPORLARI TEMİZLENİYOR" "Cyan"
+$werPaths = @(
+    "$env:ProgramData\Microsoft\Windows\WER\ReportArchive",
+    "$env:ProgramData\Microsoft\Windows\WER\Temp"
+)
+Remove-ItemsSafely -Paths $werPaths -Category "Hata Raporları" -Emoji "📊"
+
+# 7. Windows Update Geçici Dosyaları
+Write-Banner "🔄 WINDOWS UPDATE DOSYALARI TEMİZLENİYOR" "Cyan"
+$wuStopped = Stop-WindowsUpdateService
+Remove-ItemsSafely -Paths @("C:\Windows\SoftwareDistribution\Download") -Category "Windows Update" -Emoji "🔄"
+Start-WindowsUpdateService -WasStopped $wuStopped
+
+# 8. Geri Dönüşüm Kutusu
+Write-Banner "🗑️  GERİ DÖNÜŞÜM KUTUSU BOŞALTILIYOR" "Cyan"
 try {
-    # Clear-RecycleBin cmdlet'i ile tüm geri dönüşüm kutularını boşaltıyoruz
-    # -Force parametresi onay istemeden işlemi tamamlar.
-    Clear-RecycleBin -Force -ErrorAction Stop # -ErrorAction Stop hatayı yakalamamızı sağlar
-    Write-Host "Geri Dönüşüm Kutusu başarıyla boşaltıldı. ✅" -ForegroundColor Green
+    Clear-RecycleBin -Force -ErrorAction Stop
+    Write-Log "✅ Geri dönüşüm kutusu boşaltıldı" "SUCCESS"
 }
 catch {
-    Write-Host "Geri Dönüşüm Kutusunu boşaltırken bir hata oluştu: $_" -ForegroundColor Red
+    Write-Log "❌ Geri dönüşüm kutusu boşaltılamadı: $_" "ERROR"
 }
 
-# Disk Temizleme Sihirbazı'nı Çalıştırma (isteğe bağlı, daha fazla temizlik için)
-$line = "=" * 80
-Write-Host "`n$line" -ForegroundColor DarkGreen
-Write-Host "Windows Disk Temizleme Sihirbazı başlatılıyor (ek temizlik için) 🚀" -ForegroundColor Blue
-Write-Host "$line`n" -ForegroundColor DarkGreen
-Write-Host "Bu işlem ek Windows geçici dosyalarını temizleyebilir ve biraz zaman alabilir." -ForegroundColor Blue
-Start-Process cleanmgr.exe -ArgumentList "/sagerun:1" -Wait -ErrorAction SilentlyContinue
+# 9. Disk Temizleme (isteğe bağlı)
+$runCleanmgr = Read-Host "`n🚀 Windows Disk Temizleme Sihirbazı çalıştırılsın mı? (E/H)"
+if ($runCleanmgr -match '^[EeYy]') {
+    Write-Banner "🧹 DİSK TEMİZLEME SİHİRBAZI BAŞLATILIYOR" "Cyan"
+    Write-Log "🚀 Cleanmgr.exe başlatılıyor..." "INFO"
+    Start-Process cleanmgr.exe -ArgumentList "/sagerun:1" -Wait -ErrorAction SilentlyContinue
+}
 
-Write-Host "`n================================================================================" -ForegroundColor Green
-Write-Host "=== Temizlik işlemi tamamlandı! Bilgisayarınız artık daha temiz olmalı. 🎉   ===" -ForegroundColor Green
-Write-Host "================================================================================" -ForegroundColor Green
-Write-Host "İyi günler dilerim! 😊"
+# ============================================================================
+# RAPOR OLUŞTURMA
+# ============================================================================
+
+$endTime = Get-Date
+$duration = $endTime - $script:StartTime
+
+Write-Banner "📊 TEMİZLİK RAPORU 📊" "Green"
+
+$report = @"
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                        TEMİZLİK İŞLEMİ TAMAMLANDI                         ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+🎯 İSTATİSTİKLER:
+   ✅ Temizlenen Alan      : $(Format-FileSize $script:TotalSpaceFreed)
+   📄 Silinen Dosya Sayısı : $script:TotalFilesDeleted
+   ⏱️  Toplam Süre         : $($duration.Minutes) dakika $($duration.Seconds) saniye
+   📅 Tarih                : $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')
+
+📝 LOG DOSYASI:
+   $script:LogFile
+
+💡 ÖNERİLER:
+   • Bilgisayarınızı yeniden başlatmanız önerilir
+   • Disk birleştirme (defragmentation) yapabilirsiniz
+   • Düzenli temizlik için bu betiği ayda bir çalıştırın
+
+"@
+
+Write-Host $report -ForegroundColor Green
+Add-Content -Path $script:LogFile -Value $report
+
+Write-Host "`n✨ İyi günler dilerim! 😊`n" -ForegroundColor Cyan
+
+# Raporu aç
+$openLog = Read-Host "📄 Log dosyasını açmak ister misiniz? (E/H)"
+if ($openLog -match '^[EeYy]') {
+    Start-Process notepad.exe -ArgumentList $script:LogFile
+}
