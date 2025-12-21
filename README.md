@@ -1,36 +1,115 @@
-# PowerShell Sistem Temizleyici Betiği 🧹✨
+# 🧹 PowerShell Sistem Temizleyici
 
-Bu PowerShell betiği, Windows sisteminizdeki geçici, önbellek ve gereksiz dosyaları otomatik olarak temizlemek için tasarlanmıştır. Disk alanını geri kazanmanıza ve sistem performansını potansiyel olarak artırmanıza yardımcı olur.
+Windows sisteminizde biriken geçici, önbellek ve gereksiz dosyaları otomatik temizleyen gelişmiş PowerShell betiği.
 
----
+## ✨ Özellikler
 
-## Özellikler 🚀
+- **Kapsamlı Temizlik:** Geçici dosyalar, sistem önbellekleri, Windows Update kalıntıları
+- **Tarayıcı Desteği:** Chrome, Edge, Firefox, Opera, Brave önbelleklerini temizler
+- **Otomatik Güvenlik:** Tarayıcı ve Windows Update servislerini otomatik yönetir
+- **Detaylı Raporlama:** Temizlenen alan, dosya sayısı ve işlem süresini gösterir
+- **Akıllı Sistem:** Kullanıcı onayı ile güvenli temizlik yapar
+- **Log Kayıtları:** Tüm işlemleri detaylı olarak kaydeder
 
-* **Kapsamlı Temizlik:** `%TEMP%`, `C:\Windows\Temp`, `Prefetch`, `Recent` klasörleri ve Windows Hata Raporlama dosyaları gibi çeşitli geçici konumları hedefler.
-* **Tarayıcı Önbelleği Temizliği:** Google Chrome, Microsoft Edge, Mozilla Firefox, Opera ve Brave gibi popüler tarayıcıların önbelleklerini temizler.
-* **Windows Update Kalıntıları:** Windows Update tarafından indirilen geçici dosyaları siler.
-* **Geri Dönüşüm Kutusu Boşaltma:** Sistemdeki geri dönüşüm kutusunu boşaltır.
-* **Otomatik Onay:** Kullanıcı onayı istemeden otomatik olarak çalışır.
-* **Disk Temizleme Sihirbazı Entegrasyonu:** İşlem sonunda Windows'un yerleşik Disk Temizleme Sihirbazı'nı başlatarak ek temizlik yapma imkanı sunar.
-* **Görsel Geribildirim:** Her temizlik adımında renkli ve açıklayıcı mesajlar ile emoji'ler kullanarak kullanıcının süreci takip etmesini kolaylaştırır.
+## 🚀 Hızlı Başlangıç
 
----
+1. **Betiği İndirin:**
+```powershell
+git clone https://github.com/PekSec/WindowsCleanup.git
+cd WindowsCleanup
+```
 
-## Nasıl Kullanılır? 📖
+2. **Yönetici Olarak Çalıştırın:**
+   - `WindowsCleanup.ps1` dosyasına sağ tık
+   - **"PowerShell ile Çalıştır"** seçin
+   - Yönetici onayını verin
 
-1.  **Betiği İndirin:** Bu depodaki `WindowsCleanup.ps1` dosyasını bilgisayarınıza indirin.
-2.  **Yönetici Olarak Çalıştırın:**
-    * İndirdiğiniz `WindowsCleanup.ps1` dosyasına sağ tıklayın.
-    * Bağlam menüsünden **"Yönetici olarak çalıştır"** (Run as Administrator) seçeneğini seçin.
-    * PowerShell tarafından bir güvenlik uyarısı gelirse, betiği çalıştırmak için onay verin.
+Ya da PowerShell'den:
+```powershell
+.\WindowsCleanup.ps1
+```
 
-Betiği çalıştırdığınızda, temizleme işlemi otomatik olarak başlayacak ve tamamlandığında size bilgi verecektir.
+## 📦 Ne Temizlenir?
 
----
+| Kategori | Konum | Açıklama |
+|----------|-------|----------|
+| **Geçici Dosyalar** | `%TEMP%`, `C:\Windows\Temp` | Kullanıcı ve sistem geçici dosyaları |
+| **Tarayıcı Önbellekleri** | Chrome, Edge, Firefox, Opera, Brave | Tarayıcı cache ve code cache |
+| **Windows Update** | `SoftwareDistribution\Download` | Güncelleme geçici dosyaları |
+| **Prefetch** | `C:\Windows\Prefetch` | Uygulama başlatma önbelleği (isteğe bağlı) |
+| **Hata Raporları** | WER klasörleri | Windows hata raporlama dosyaları |
+| **Geri Dönüşüm Kutusu** | Recycle Bin | Tüm sürücülerdeki silinmiş dosyalar |
 
-## Önemli Notlar ve Uyarılar ⚠️
+## 📊 Örnek Çıktı
 
-* **Yönetici Yetkisi:** Bu betiği çalıştırmak için **yönetici yetkileri** gereklidir. Yönetici olarak çalıştırmazsanız, betik otomatik olarak kapanacaktır.
-* **`Prefetch` Klasörü:** `C:\Windows\Prefetch` klasöründeki dosyaların temizlenmesi, Windows'un uygulama başlangıç hızını yeniden optimize etmesine neden olabilir. Bu, ilk birkaç çalıştırmada bazı uygulamaların biraz daha yavaş açılmasına neden olabilir, ancak sistem zamanla bu verileri yeniden oluşturarak eski hızına dönecektir.
-* **Tarayıcılar:** Betik çalışırken açık olan tarayıcılar, önbellek dosyalarını kilitli tutabilir ve bu durumda ilgili tarayıcı önbellekleri tam olarak temizlenemeyebilir. En iyi sonuçlar için betiği çalıştırmadan önce tarayıcılarınızı kapatmanız önerilir.
-* **Hata Yönetimi:** Betik, bulunamayan yolları atlar ve çalışmaya devam eder. Herhangi bir hatayla karşılaşılırsa, konsola hata mesajı yazdırılır ancak betiğin tamamının durmasına neden olmaz.
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                        TEMİZLİK İŞLEMİ TAMAMLANDI                         ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+🎯 İSTATİSTİKLER:
+   ✅ Temizlenen Alan      : 3.47 GB
+   📄 Silinen Dosya Sayısı : 12,847
+   ⏱️  Toplam Süre         : 2 dakika 34 saniye
+   📅 Tarih                : 21.12.2024 14:23:45
+```
+
+## ⚠️ Önemli Notlar
+
+### Yönetici Yetkisi
+Betik yönetici yetkisi olmadan çalışmaz. Yönetici olarak çalıştırmazsanız otomatik kapanır.
+
+### Tarayıcılar
+Betik, tarayıcıları otomatik kapatır. Açık sekmelerinizi kaydetmeyi unutmayın!
+
+### Prefetch Klasörü
+Prefetch temizliği için ayrı onay istenir. İlk çalıştırmada bazı uygulamalar yavaş açılabilir ancak sistem kısa sürede optimize olur.
+
+### Windows Update
+Windows Update servisi geçici olarak durdurulur, temizlik yapılır ve tekrar başlatılır.
+
+## 📅 Zamanlanmış Görev Oluşturma
+
+Haftalık otomatik temizlik için:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "PowerShell.exe" `
+    -Argument "-ExecutionPolicy Bypass -File C:\Scripts\WindowsCleanup.ps1"
+
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 3AM
+
+Register-ScheduledTask -TaskName "WeeklyCleanup" `
+    -Action $action -Trigger $trigger -RunLevel Highest
+```
+
+## 🔧 Sorun Giderme 
+
+**"Script Çalıştırma Devre Dışı" Hatası:**
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+```
+
+**"Erişim Engellendi" Hatası:**
+- PowerShell'i yönetici olarak açın
+- Tarayıcıları kapatın ve tekrar deneyin
+
+**Log Dosyası Konumu:**
+```powershell
+$env:TEMP\CleanupLog_*.txt
+```
+
+## 📋 Gereksinimler 
+
+- Windows 10/11 veya Windows Server 2016+
+- PowerShell 5.1 veya üzeri
+- Yönetici (Administrator) yetkisi
+
+## 🆕 v3.0 Yenilikleri
+
+- ✅ Kullanıcı onay sistemi
+- ✅ Detaylı loglama ve raporlama
+- ✅ Temizlenen alan hesaplama
+- ✅ Otomatik tarayıcı yönetimi
+- ✅ Windows Update servis kontrolü
+- ✅ İşlem süresi takibi
+- ✅ Gelişmiş hata yönetimi
