@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     Gelişmiş Windows Sistem Temizlik Betiği v3.0 🚀
