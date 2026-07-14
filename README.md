@@ -77,13 +77,13 @@ Browser caches cover `Cache`, `Code Cache`, `GPUCache`, shader caches, and Servi
    Administrator privileges detected.
 
 ╭──────────────────────────────────────────────────────────────╮
-│                    STEP 2 - TEMPORARY FILES                │
+│                    STEP 2 - TEMPORARY FILES                  │
 ╰──────────────────────────────────────────────────────────────╯
    Cleaning [UserTemp]: C:\Users\you\AppData\Local\Temp (1.82 GB, 4,213 files)
    Completed [UserTemp]: C:\Users\you\AppData\Local\Temp
 
 ╭──────────────────────────────────────────────────────────────╮
-│                        CLEANUP REPORT                       │
+│                        CLEANUP REPORT                        │
 ╰──────────────────────────────────────────────────────────────╯
    Estimated space freed : 3.47 GB
    Files discovered      : 12,847
