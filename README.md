@@ -38,30 +38,30 @@ For a fully unattended run:
 
 ## 🧰 Parameters
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `-AssumeYes` | switch | off | Answer *yes* to all prompts (unattended mode); skips the interactive Disk Cleanup wizard and the "open log" prompt |
-| `-IncludePrefetch` | switch | off | Clean `C:\Windows\Prefetch` without asking |
-| `-SkipBrowserClose` | switch | off | Don't close running browsers (their caches may then be locked) |
-| `-SkipCleanMgr` | switch | off | Never offer the Windows Disk Cleanup wizard |
-| `-OpenLog` | switch | off | Open the log file in Notepad when finished |
-| `-SkipElevationRequest` | switch | off | Don't offer the UAC relaunch; run with current privileges |
-| `-DeleteRetryCount` | int | `2` | Retries per failed delete before the quarantine fallback |
-| `-DeleteRetryDelayMs` | int | `500` | Delay between delete retries |
-| `-BrowserCloseTimeoutMs` | int | `2500` | Grace period before browsers are force-closed |
+| Parameter                | Type   | Default | Description                                                                                                        |
+| ------------------------ | ------ | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| `-AssumeYes`             | switch | off     | Answer _yes_ to all prompts (unattended mode); skips the interactive Disk Cleanup wizard and the "open log" prompt |
+| `-IncludePrefetch`       | switch | off     | Clean `C:\Windows\Prefetch` without asking                                                                         |
+| `-SkipBrowserClose`      | switch | off     | Don't close running browsers (their caches may then be locked)                                                     |
+| `-SkipCleanMgr`          | switch | off     | Never offer the Windows Disk Cleanup wizard                                                                        |
+| `-OpenLog`               | switch | off     | Open the log file in Notepad when finished                                                                         |
+| `-SkipElevationRequest`  | switch | off     | Don't offer the UAC relaunch; run with current privileges                                                          |
+| `-DeleteRetryCount`      | int    | `2`     | Retries per failed delete before the quarantine fallback                                                           |
+| `-DeleteRetryDelayMs`    | int    | `500`   | Delay between delete retries                                                                                       |
+| `-BrowserCloseTimeoutMs` | int    | `2500`  | Grace period before browsers are force-closed                                                                      |
 
 ## 🗑️ What Gets Cleaned
 
-| Category | Location | Admin needed |
-|---|---|---|
-| 🗂️ User temp files | `%TEMP%`, `%LOCALAPPDATA%\Temp` | No |
-| 🖥️ System temp files | `C:\Windows\Temp` | Yes |
-| 🚀 Prefetch (optional) | `C:\Windows\Prefetch` | Yes |
-| 🕘 Recent items | `%APPDATA%\Microsoft\Windows\Recent` | No |
-| 🌐 Browser caches | Chrome, Edge, Brave, Opera, Firefox (all profiles) | No |
-| 💥 Error reports | `%ProgramData%\Microsoft\Windows\WER` | Yes |
-| 📦 Windows Update cache | `C:\Windows\SoftwareDistribution\Download` | Yes |
-| ♻️ Recycle Bin | All fixed drives | No¹ |
+| Category                | Location                                           | Admin needed |
+| ----------------------- | -------------------------------------------------- | ------------ |
+| 🗂️ User temp files      | `%TEMP%`, `%LOCALAPPDATA%\Temp`                    | No           |
+| 🖥️ System temp files    | `C:\Windows\Temp`                                  | Yes          |
+| 🚀 Prefetch (optional)  | `C:\Windows\Prefetch`                              | Yes          |
+| 🕘 Recent items         | `%APPDATA%\Microsoft\Windows\Recent`               | No           |
+| 🌐 Browser caches       | Chrome, Edge, Brave, Opera, Firefox (all profiles) | No           |
+| 💥 Error reports        | `%ProgramData%\Microsoft\Windows\WER`              | Yes          |
+| 📦 Windows Update cache | `C:\Windows\SoftwareDistribution\Download`         | Yes          |
+| ♻️ Recycle Bin          | All fixed drives                                   | No¹          |
 
 ¹ Uses `Clear-RecycleBin`; the filesystem fallback (`$Recycle.Bin` folders) requires admin.
 
@@ -119,6 +119,7 @@ Register-ScheduledTask -TaskName "WeeklyCleanup" `
 ## 🔧 Troubleshooting
 
 **"Running scripts is disabled on this system"**
+
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 ```
@@ -127,7 +128,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 Run elevated (accept the UAC prompt) and close browsers first. Non-elevated runs skip protected system folders by design.
 
 **Icons look like boxes (□)**
-Your terminal font isn't a Nerd Font. Install one (e.g. *CaskaydiaCove Nerd Font*) or ignore it — functionality is unaffected.
+Your terminal font isn't a Nerd Font. Install one (e.g. _CaskaydiaCove Nerd Font_) or ignore it — functionality is unaffected.
 
 **Some files survive the cleanup**
 Locked files held by running processes are retried, then skipped and reported as soft errors. They usually disappear on the next run after a reboot.
