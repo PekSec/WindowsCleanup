@@ -1,10 +1,10 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Refactored Windows cleanup script with soft-error handling and self-heal retries.
+    Windows cleanup script with soft-error handling and self-heal retries.
 
 .DESCRIPTION
-    Keeps the original cleanup workflow, but avoids hard exits and centralizes error handling.
+    Runs the cleanup workflow without hard exits and with centralized error handling.
     The script continues on non-critical failures, logs soft errors, retries failed deletions,
     clears restrictive file attributes, tries a quarantine/rename delete fallback, and restores
     services that it stopped.
@@ -13,6 +13,7 @@
     PowerShell: 5.1+
     Recommended: Run as Administrator for full cleanup coverage.
     If not elevated, the script can relaunch itself with a UAC prompt while preserving soft-error behavior.
+    Console output uses Nerd Font glyphs; install a Nerd Font for best results (plain text otherwise).
 #>
 
 [CmdletBinding()]
@@ -24,13 +25,20 @@ param(
     [switch]$OpenLog,
     [switch]$SkipElevationRequest,
     [switch]$ElevationRelaunched,
-    [int]$DeleteRetryCount = 2,
-    [int]$DeleteRetryDelayMs = 500,
-    [int]$BrowserCloseTimeoutMs = 2500
+    [ValidateRange(0, 10)][int]$DeleteRetryCount = 2,
+    [ValidateRange(0, 60000)][int]$DeleteRetryDelayMs = 500,
+    [ValidateRange(0, 60000)][int]$BrowserCloseTimeoutMs = 2500
 )
 
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
+
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+}
+catch {
+    # Some hosts do not allow changing the output encoding. Ignore.
+}
 
 $script:InitialBoundParameters = @{}
 foreach ($entry in $PSBoundParameters.GetEnumerator()) {
@@ -38,7 +46,19 @@ foreach ($entry in $PSBoundParameters.GetEnumerator()) {
 }
 
 $script:StartTime = Get-Date
-$script:LogFile = Join-Path $env:TEMP ("CleanupLog_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+
+# Keep logs outside every cleanup target so the script never deletes its own log.
+$script:LogDirectory = Join-Path $env:LOCALAPPDATA 'WindowsCleanup'
+try {
+    if (-not (Test-Path -LiteralPath $script:LogDirectory)) {
+        New-Item -ItemType Directory -Path $script:LogDirectory -Force -ErrorAction Stop | Out-Null
+    }
+}
+catch {
+    $script:LogDirectory = $env:TEMP
+}
+$script:LogFile = Join-Path $script:LogDirectory ("CleanupLog_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+
 $script:SoftErrors = New-Object 'System.Collections.Generic.List[object]'
 $script:StoppedServices = @{}
 $script:Stats = [ordered]@{
@@ -60,6 +80,16 @@ $script:Colors = @{
     SKIP  = 'DarkYellow'
 }
 
+# Nerd Font glyphs (rendered correctly with any Nerd Font patched terminal font).
+$script:Icons = @{
+    OK    = [char]0xF00C   # nf-fa-check
+    WARN  = [char]0xF071   # nf-fa-warning
+    ERROR = [char]0xF057   # nf-fa-times_circle
+    INFO  = [char]0xF05A   # nf-fa-info_circle
+    STEP  = [char]0xF0A9   # nf-fa-arrow_circle_right
+    SKIP  = [char]0xF051   # nf-fa-step_forward
+}
+
 function Write-Log {
     param(
         [Parameter(Mandatory = $true)][string]$Message,
@@ -77,7 +107,8 @@ function Write-Log {
     }
 
     $color = if ($script:Colors.ContainsKey($Level)) { $script:Colors[$Level] } else { 'White' }
-    Write-Host $Message -ForegroundColor $color
+    $icon = if ($script:Icons.ContainsKey($Level)) { $script:Icons[$Level] } else { ' ' }
+    Write-Host (' {0}  {1}' -f $icon, $Message) -ForegroundColor $color
 }
 
 function Write-Banner {
@@ -86,10 +117,22 @@ function Write-Banner {
         [string]$Color = 'Cyan'
     )
 
-    $line = '=' * 80
-    Write-Host "`n$line" -ForegroundColor $Color
-    Write-Host $Text -ForegroundColor $Color
-    Write-Host "$line`n" -ForegroundColor $Color
+    $width = 78
+    $inner = $Text
+    if ($inner.Length -gt ($width - 4)) {
+        $inner = $inner.Substring(0, $width - 4)
+    }
+    # Count display characters, not UTF-16 code units, so surrogate-pair glyphs align.
+    $innerLength = ([System.Globalization.StringInfo]::new($inner)).LengthInTextElements
+    $padTotal = $width - 2 - $innerLength
+    $padLeft = [int][Math]::Floor($padTotal / 2)
+    $padRight = $padTotal - $padLeft
+
+    Write-Host ''
+    Write-Host ('╭' + ('─' * ($width - 2)) + '╮') -ForegroundColor $Color
+    Write-Host ('│' + (' ' * $padLeft) + $inner + (' ' * $padRight) + '│') -ForegroundColor $Color
+    Write-Host ('╰' + ('─' * ($width - 2)) + '╯') -ForegroundColor $Color
+    Write-Host ''
 }
 
 function Add-SoftError {
@@ -122,8 +165,7 @@ function Test-IsAdministrator {
     }
 }
 
-
-function Quote-ProcessArgument {
+function ConvertTo-ProcessArgument {
     param([Parameter(Mandatory = $true)][object]$Value)
 
     $text = [string]$Value
@@ -140,12 +182,12 @@ function New-ElevatedInvocationArguments {
         [Parameter(Mandatory = $true)][hashtable]$BoundParameters
     )
 
-    $args = New-Object 'System.Collections.Generic.List[string]'
-    [void]$args.Add('-NoProfile')
-    [void]$args.Add('-ExecutionPolicy')
-    [void]$args.Add('Bypass')
-    [void]$args.Add('-File')
-    [void]$args.Add((Quote-ProcessArgument -Value $ScriptPath))
+    $argumentItems = New-Object 'System.Collections.Generic.List[string]'
+    [void]$argumentItems.Add('-NoProfile')
+    [void]$argumentItems.Add('-ExecutionPolicy')
+    [void]$argumentItems.Add('Bypass')
+    [void]$argumentItems.Add('-File')
+    [void]$argumentItems.Add((ConvertTo-ProcessArgument -Value $ScriptPath))
 
     foreach ($key in ($BoundParameters.Keys | Sort-Object)) {
         if ($key -eq 'ElevationRelaunched') {
@@ -156,26 +198,26 @@ function New-ElevatedInvocationArguments {
 
         if ($value -is [System.Management.Automation.SwitchParameter]) {
             if ($value.IsPresent) {
-                [void]$args.Add("-$key")
+                [void]$argumentItems.Add("-$key")
             }
             continue
         }
 
         if ($value -is [bool]) {
             if ($value) {
-                [void]$args.Add("-$key")
+                [void]$argumentItems.Add("-$key")
             }
             continue
         }
 
         if ($null -ne $value) {
-            [void]$args.Add("-$key")
-            [void]$args.Add((Quote-ProcessArgument -Value $value))
+            [void]$argumentItems.Add("-$key")
+            [void]$argumentItems.Add((ConvertTo-ProcessArgument -Value $value))
         }
     }
 
-    [void]$args.Add('-ElevationRelaunched')
-    return $args.ToArray()
+    [void]$argumentItems.Add('-ElevationRelaunched')
+    return $argumentItems.ToArray()
 }
 
 function Request-AdministratorElevation {
@@ -240,14 +282,22 @@ function Read-YesNo {
         return $true
     }
 
-    $suffix = if ($DefaultYes) { '[E/h]' } else { '[e/H]' }
-    $answer = Read-Host ("{0} {1}" -f $Prompt, $suffix)
+    $suffix = if ($DefaultYes) { '[Y/n]' } else { '[y/N]' }
+
+    try {
+        $answer = Read-Host ("{0} {1}" -f $Prompt, $suffix)
+    }
+    catch {
+        # Non-interactive host (e.g. scheduled task without -AssumeYes): use the default.
+        Write-Log ("No interactive input available; using default answer for: {0}" -f $Prompt) 'WARN'
+        return $DefaultYes
+    }
 
     if ([string]::IsNullOrWhiteSpace($answer)) {
         return $DefaultYes
     }
 
-    return ($answer -match '^[EeYy]')
+    return ($answer -match '^[YyEe]')
 }
 
 function Format-FileSize {
@@ -317,9 +367,14 @@ function Measure-CleanupPath {
             return [pscustomobject]$result
         }
 
-        Get-ChildItem -LiteralPath $LiteralPath -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
-            $result['Files'] = [int64]$result['Files'] + 1
-            $result['Bytes'] = [int64]$result['Bytes'] + [int64]$_.Length
+        $measured = Get-ChildItem -LiteralPath $LiteralPath -Recurse -Force -File -ErrorAction SilentlyContinue |
+            Measure-Object -Property Length -Sum
+
+        if ($measured) {
+            $result.Files = [int64]$measured.Count
+            if ($null -ne $measured.Sum) {
+                $result.Bytes = [int64]$measured.Sum
+            }
         }
     }
     catch {
@@ -361,6 +416,26 @@ function Remove-PathWithSelfHeal {
         return $true
     }
 
+    # Junctions and symlinks must be unlinked, never recursed into: Remove-Item -Recurse
+    # on PowerShell 5.1 can follow a reparse point and delete the *target's* contents.
+    try {
+        $item = Get-Item -LiteralPath $LiteralPath -Force -ErrorAction Stop
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            try {
+                $item.Delete()
+                return $true
+            }
+            catch {
+                $script:Stats.DeleteFailures++
+                Add-SoftError -Context $Context -Message ("Could not remove reparse point (link left untouched): {0}" -f $LiteralPath) -Exception $_.Exception
+                return $false
+            }
+        }
+    }
+    catch {
+        # Could not inspect attributes; continue with the normal delete path.
+    }
+
     for ($attempt = 0; $attempt -le $DeleteRetryCount; $attempt++) {
         try {
             Remove-Item -LiteralPath $LiteralPath -Recurse -Force -ErrorAction Stop
@@ -376,6 +451,7 @@ function Remove-PathWithSelfHeal {
                 continue
             }
 
+            $quarantinePath = $null
             try {
                 if (Test-Path -LiteralPath $LiteralPath) {
                     $parent = [System.IO.Path]::GetDirectoryName($LiteralPath)
@@ -391,6 +467,16 @@ function Remove-PathWithSelfHeal {
             }
             catch {
                 $lastError = $_.Exception
+
+                # Undo a half-finished quarantine so no ".cleanup_pending_*" litter remains.
+                if ($quarantinePath -and (Test-Path -LiteralPath $quarantinePath)) {
+                    try {
+                        Rename-Item -LiteralPath $quarantinePath -NewName ([System.IO.Path]::GetFileName($LiteralPath)) -Force -ErrorAction Stop
+                    }
+                    catch {
+                        Add-SoftError -Context $Context -Message ("Quarantined item could not be renamed back: {0}" -f $quarantinePath) -Exception $_.Exception
+                    }
+                }
             }
 
             $script:Stats.DeleteFailures++
@@ -415,6 +501,8 @@ function Clear-CleanupTarget {
         return
     }
 
+    $seenTargets = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+
     foreach ($rawPath in $Paths) {
         $targets = @(Resolve-CleanupPath -Path $rawPath)
 
@@ -425,6 +513,12 @@ function Clear-CleanupTarget {
         }
 
         foreach ($target in $targets) {
+            $normalized = $target.TrimEnd('\')
+            if (-not $seenTargets.Add($normalized)) {
+                Write-Log ("Skipped duplicate target: {0}" -f $target) 'SKIP'
+                continue
+            }
+
             try {
                 $measure = Measure-CleanupPath -LiteralPath $target
                 if (-not $measure.Exists) {
@@ -439,6 +533,9 @@ function Clear-CleanupTarget {
 
                 if ($measure.IsDirectory) {
                     Get-ChildItem -LiteralPath $target -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                        if ($_.FullName -eq $script:LogFile) {
+                            return
+                        }
                         if (-not (Remove-PathWithSelfHeal -LiteralPath $_.FullName -Context $Category)) {
                             $failedChildren++
                         }
@@ -450,8 +547,15 @@ function Clear-CleanupTarget {
                     }
                 }
 
+                # Re-measure only when something failed, so the freed-space figure stays honest.
+                $freedBytes = [int64]$measure.Bytes
+                if ($failedChildren -gt 0) {
+                    $remaining = Measure-CleanupPath -LiteralPath $target
+                    $freedBytes = [Math]::Max([int64]0, [int64]($measure.Bytes - $remaining.Bytes))
+                }
+
                 $script:Stats.TargetsProcessed++
-                $script:Stats.EstimatedBytesFreed += [int64]$measure.Bytes
+                $script:Stats.EstimatedBytesFreed += $freedBytes
                 $script:Stats.EstimatedFilesSeen += [int64]$measure.Files
 
                 if ($failedChildren -eq 0) {
@@ -476,7 +580,7 @@ function Invoke-Step {
         [string]$Color = 'Cyan'
     )
 
-    Write-Banner $Name $Color
+    Write-Banner ('{0}  {1}' -f $script:Icons.STEP, $Name) $Color
 
     try {
         & $Action
@@ -497,13 +601,7 @@ function Stop-BrowserProcesses {
     }
 
     $browserNames = @('chrome','firefox','msedge','opera','brave','brave-browser','iexplore')
-    $processes = @()
-
-    foreach ($name in $browserNames) {
-        $processes += @(Get-Process -Name $name -ErrorAction SilentlyContinue)
-    }
-
-    $processes = @($processes | Sort-Object Id -Unique)
+    $processes = @(Get-Process -Name $browserNames -ErrorAction SilentlyContinue | Sort-Object Id -Unique)
 
     if ($processes.Count -eq 0) {
         Write-Log 'No supported browser processes were running.' 'OK'
@@ -576,7 +674,7 @@ function Stop-ServicesSafely {
 }
 
 function Restore-StoppedServices {
-    foreach ($name in $script:StoppedServices.Keys) {
+    foreach ($name in @($script:StoppedServices.Keys)) {
         if ($script:StoppedServices[$name] -ne 'Running') {
             continue
         }
@@ -604,15 +702,15 @@ function Get-ChromiumCachePaths {
         return @()
     }
 
-    $profiles = Get-ChildItem -LiteralPath $UserDataRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object {
+    $profileDirs = Get-ChildItem -LiteralPath $UserDataRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object {
         $_.Name -eq 'Default' -or
         $_.Name -like 'Profile *' -or
         $_.Name -eq 'Guest Profile'
     }
 
-    foreach ($profile in $profiles) {
+    foreach ($profileDir in $profileDirs) {
         foreach ($relative in @('Cache','Code Cache','GPUCache','GrShaderCache','ShaderCache','Service Worker\CacheStorage')) {
-            [void]$paths.Add((Join-Path $profile.FullName $relative))
+            [void]$paths.Add((Join-Path $profileDir.FullName $relative))
         }
     }
 
@@ -631,10 +729,10 @@ function Get-FirefoxCachePaths {
             continue
         }
 
-        $profiles = Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue
-        foreach ($profile in $profiles) {
+        $profileDirs = Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue
+        foreach ($profileDir in $profileDirs) {
             foreach ($relative in @('cache2','startupCache','thumbnails')) {
-                [void]$paths.Add((Join-Path $profile.FullName $relative))
+                [void]$paths.Add((Join-Path $profileDir.FullName $relative))
             }
         }
     }
@@ -696,40 +794,58 @@ function Start-CleanMgrSafely {
 function Show-Summary {
     $endTime = Get-Date
     $duration = $endTime - $script:StartTime
+    $durationText = '{0} minute(s) {1} second(s)' -f [int][Math]::Floor($duration.TotalMinutes), $duration.Seconds
 
-    Write-Banner 'CLEANUP REPORT' 'Green'
+    Write-Banner ('{0}  CLEANUP REPORT' -f [char]0xF080) 'Green'
+
+    $iconDisk  = [char]0xF0A0   # nf-fa-hdd_o
+    $iconFile  = [char]0xF0F6   # nf-fa-file_text_o
+    $iconOk    = $script:Icons.OK
+    $iconSkip  = $script:Icons.SKIP
+    $iconFail  = $script:Icons.ERROR
+    $iconWarn  = $script:Icons.WARN
+    $iconClock = [char]0xF017   # nf-fa-clock_o
+    $iconLog   = [char]0xF15C   # nf-fa-file_text
 
     $summary = @"
 Cleanup completed with soft-error handling.
 
-Statistics:
-  Estimated cleaned data : $(Format-FileSize $script:Stats.EstimatedBytesFreed)
-  Files discovered       : $($script:Stats.EstimatedFilesSeen)
-  Targets processed      : $($script:Stats.TargetsProcessed)
-  Targets skipped        : $($script:Stats.TargetsSkipped)
-  Delete failures        : $($script:Stats.DeleteFailures)
-  Soft errors            : $($script:SoftErrors.Count)
-  Duration               : $($duration.Minutes) minute(s) $($duration.Seconds) second(s)
-  Log file               : $script:LogFile
+ $iconDisk  Estimated space freed : $(Format-FileSize $script:Stats.EstimatedBytesFreed)
+ $iconFile  Files discovered      : $($script:Stats.EstimatedFilesSeen)
+ $iconOk  Targets processed     : $($script:Stats.TargetsProcessed)
+ $iconSkip  Targets skipped       : $($script:Stats.TargetsSkipped)
+ $iconFail  Delete failures       : $($script:Stats.DeleteFailures)
+ $iconWarn  Soft errors           : $($script:SoftErrors.Count)
+ $iconClock  Duration              : $durationText
+ $iconLog  Log file              : $script:LogFile
 
 Note:
-  Cleaned data is estimated from pre-clean measurements to avoid a second full disk scan.
-  Some locked files may remain until the owning process is closed or the system is rebooted.
+  Freed space is estimated from pre-clean measurements; targets with failures are
+  re-measured so the figure stays accurate. Some locked files may remain until the
+  owning process is closed or the system is rebooted.
 "@
 
     Write-Host $summary -ForegroundColor Green
-    Add-Content -LiteralPath $script:LogFile -Value $summary -Encoding UTF8
+
+    try {
+        Add-Content -LiteralPath $script:LogFile -Value $summary -Encoding UTF8 -ErrorAction Stop
+
+        if ($script:SoftErrors.Count -gt 0) {
+            Add-Content -LiteralPath $script:LogFile -Value 'Soft error details:' -Encoding UTF8
+            foreach ($errorRecord in $script:SoftErrors) {
+                Add-Content -LiteralPath $script:LogFile -Value ($errorRecord | Format-List | Out-String) -Encoding UTF8
+            }
+        }
+    }
+    catch {
+        Write-Warning ("Could not write summary to log file: {0}" -f $_.Exception.Message)
+    }
 
     if ($script:SoftErrors.Count -gt 0) {
-        Write-Host 'Soft error summary:' -ForegroundColor Yellow
+        Write-Host (' {0}  Soft error summary:' -f $script:Icons.WARN) -ForegroundColor Yellow
         $script:SoftErrors |
             Select-Object -First 15 Time, Context, Message |
             Format-Table -AutoSize | Out-String | Write-Host -ForegroundColor Yellow
-
-        Add-Content -LiteralPath $script:LogFile -Value 'Soft error details:' -Encoding UTF8
-        foreach ($errorRecord in $script:SoftErrors) {
-            Add-Content -LiteralPath $script:LogFile -Value ($errorRecord | Format-List | Out-String) -Encoding UTF8
-        }
     }
 }
 
@@ -749,7 +865,7 @@ if (-not $script:IsAdministrator) {
     }
 }
 
-Write-Banner 'WINDOWS SYSTEM CLEANUP TOOL - REFACTORED SOFT-ERROR BUILD' 'Magenta'
+Write-Banner ('{0}  WINDOWS SYSTEM CLEANUP TOOL' -f [char]::ConvertFromUtf32(0xF00E2)) 'Magenta'
 Write-Log ("Log file: {0}" -f $script:LogFile) 'INFO'
 Write-Log ("Start time: {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) 'INFO'
 
@@ -760,15 +876,18 @@ else {
     Write-Log 'Administrator privileges were not detected. Protected system targets will be skipped, not fatal.' 'WARN'
 }
 
+$iconBullet = [char]0xF054   # nf-fa-chevron_right
+
 Write-Host ''
 Write-Host 'This workflow can clean:' -ForegroundColor Yellow
-Write-Host '  - User and system temporary files' -ForegroundColor Gray
-Write-Host '  - Browser caches, after browser shutdown unless skipped' -ForegroundColor Gray
-Write-Host '  - Windows Update temporary downloads' -ForegroundColor Gray
-Write-Host '  - Prefetch files, when selected' -ForegroundColor Gray
-Write-Host '  - Recent-items shortcuts' -ForegroundColor Gray
-Write-Host '  - Windows Error Reporting files' -ForegroundColor Gray
-Write-Host '  - Recycle Bin' -ForegroundColor Gray
+Write-Host (" $iconBullet User and system temporary files") -ForegroundColor Gray
+Write-Host (" $iconBullet Browser caches, after browser shutdown unless skipped") -ForegroundColor Gray
+Write-Host (" $iconBullet Windows Update temporary downloads") -ForegroundColor Gray
+Write-Host (" $iconBullet Prefetch files, when selected") -ForegroundColor Gray
+Write-Host (" $iconBullet Recent-items shortcuts") -ForegroundColor Gray
+Write-Host (" $iconBullet Windows Error Reporting files") -ForegroundColor Gray
+Write-Host (" $iconBullet Recycle Bin") -ForegroundColor Gray
+Write-Host ''
 
 if (-not (Read-YesNo -Prompt 'Continue cleanup?' -DefaultYes $false)) {
     Write-Log 'Cleanup cancelled by user. No hard exit was used.' 'WARN'

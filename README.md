@@ -1,80 +1,112 @@
-# 🧹 PowerShell Sistem Temizleyici
+# 🧹 WindowsCleanup
 
-Windows sisteminizde biriken geçici, önbellek ve gereksiz dosyaları otomatik temizleyen gelişmiş PowerShell betiği.
+A PowerShell cleanup tool for Windows that removes temporary files, browser caches, and system leftovers — safely. No hard exits, no red walls of errors: every failure is caught, logged, retried, and reported at the end.
 
-## ✨ Özellikler
+## ✨ Features
 
-- **Kapsamlı Temizlik:** Geçici dosyalar, sistem önbellekleri, Windows Update kalıntıları
-- **Tarayıcı Desteği:** Chrome, Edge, Firefox, Opera, Brave önbelleklerini temizler
-- **Otomatik Güvenlik:** Tarayıcı ve Windows Update servislerini otomatik yönetir
-- **Detaylı Raporlama:** Temizlenen alan, dosya sayısı ve işlem süresini gösterir
-- **Akıllı Sistem:** Kullanıcı onayı ile güvenli temizlik yapar
-- **Log Kayıtları:** Tüm işlemleri detaylı olarak kaydeder
+- 🛡️ **Soft-error handling** — the script never dies mid-run; failures are collected and summarized
+- 🔁 **Self-heal deletes** — retries locked files, strips restrictive attributes, and falls back to a quarantine-rename delete
+- 🌐 **Browser aware** — gracefully closes Chrome, Edge, Firefox, Opera, and Brave before clearing their caches
+- ⚙️ **Service safe** — stops Windows Update services for cache cleanup and always restores them afterwards
+- 🔐 **Elevation friendly** — offers a UAC relaunch when not elevated; without admin rights it simply skips protected targets
+- 📊 **Honest statistics** — freed space is measured before cleaning and re-measured when deletes fail, so numbers stay accurate
+- 📝 **Full logging** — every action lands in a timestamped log file kept safely outside the cleaned folders
+- 💎 **Pretty console output** — colored, icon-decorated output (uses [Nerd Font](https://www.nerdfonts.com/) glyphs; falls back to plain text on other fonts)
 
-## 🚀 Hızlı Başlangıç
+## 📋 Requirements
 
-1. **Betiği İndirin:**
+- Windows 10 / 11 or Windows Server 2016+
+- PowerShell 5.1 or newer (PowerShell 7 works too)
+- Administrator rights recommended — not required (protected targets are skipped without them)
+- Optional: a Nerd Font terminal font for the icons
+
+## 🚀 Quick Start
+
 ```powershell
 git clone https://github.com/PekSec/WindowsCleanup.git
 cd WindowsCleanup
-```
-
-2. **Yönetici Olarak Çalıştırın:**
-   - `WindowsCleanup.ps1` dosyasına sağ tık
-   - **"PowerShell ile Çalıştır"** seçin
-   - Yönetici onayını verin
-
-Ya da PowerShell'den:
-```powershell
 .\WindowsCleanup.ps1
 ```
 
-## 📦 Ne Temizlenir?
+The script asks for confirmation before cleaning, offers a UAC elevation prompt when not running as Administrator, and asks separately before touching Prefetch or launching the Disk Cleanup wizard.
 
-| Kategori | Konum | Açıklama |
-|----------|-------|----------|
-| **Geçici Dosyalar** | `%TEMP%`, `C:\Windows\Temp` | Kullanıcı ve sistem geçici dosyaları |
-| **Tarayıcı Önbellekleri** | Chrome, Edge, Firefox, Opera, Brave | Tarayıcı cache ve code cache |
-| **Windows Update** | `SoftwareDistribution\Download` | Güncelleme geçici dosyaları |
-| **Prefetch** | `C:\Windows\Prefetch` | Uygulama başlatma önbelleği (isteğe bağlı) |
-| **Hata Raporları** | WER klasörleri | Windows hata raporlama dosyaları |
-| **Geri Dönüşüm Kutusu** | Recycle Bin | Tüm sürücülerdeki silinmiş dosyalar |
+For a fully unattended run:
 
-## 📊 Örnek Çıktı
-
-```
-╔═══════════════════════════════════════════════════════════════════════════╗
-║                        TEMİZLİK İŞLEMİ TAMAMLANDI                         ║
-╚═══════════════════════════════════════════════════════════════════════════╝
-
-🎯 İSTATİSTİKLER:
-   ✅ Temizlenen Alan      : 3.47 GB
-   📄 Silinen Dosya Sayısı : 12,847
-   ⏱️  Toplam Süre         : 2 dakika 34 saniye
-   📅 Tarih                : 21.12.2024 14:23:45
+```powershell
+.\WindowsCleanup.ps1 -AssumeYes -SkipCleanMgr
 ```
 
-## ⚠️ Önemli Notlar
+## 🧰 Parameters
 
-### Yönetici Yetkisi
-Betik yönetici yetkisi olmadan çalışmaz. Yönetici olarak çalıştırmazsanız otomatik kapanır.
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-AssumeYes` | switch | off | Answer *yes* to all prompts (unattended mode); skips the interactive Disk Cleanup wizard and the "open log" prompt |
+| `-IncludePrefetch` | switch | off | Clean `C:\Windows\Prefetch` without asking |
+| `-SkipBrowserClose` | switch | off | Don't close running browsers (their caches may then be locked) |
+| `-SkipCleanMgr` | switch | off | Never offer the Windows Disk Cleanup wizard |
+| `-OpenLog` | switch | off | Open the log file in Notepad when finished |
+| `-SkipElevationRequest` | switch | off | Don't offer the UAC relaunch; run with current privileges |
+| `-DeleteRetryCount` | int | `2` | Retries per failed delete before the quarantine fallback |
+| `-DeleteRetryDelayMs` | int | `500` | Delay between delete retries |
+| `-BrowserCloseTimeoutMs` | int | `2500` | Grace period before browsers are force-closed |
 
-### Tarayıcılar
-Betik, tarayıcıları otomatik kapatır. Açık sekmelerinizi kaydetmeyi unutmayın!
+## 🗑️ What Gets Cleaned
 
-### Prefetch Klasörü
-Prefetch temizliği için ayrı onay istenir. İlk çalıştırmada bazı uygulamalar yavaş açılabilir ancak sistem kısa sürede optimize olur.
+| Category | Location | Admin needed |
+|---|---|---|
+| 🗂️ User temp files | `%TEMP%`, `%LOCALAPPDATA%\Temp` | No |
+| 🖥️ System temp files | `C:\Windows\Temp` | Yes |
+| 🚀 Prefetch (optional) | `C:\Windows\Prefetch` | Yes |
+| 🕘 Recent items | `%APPDATA%\Microsoft\Windows\Recent` | No |
+| 🌐 Browser caches | Chrome, Edge, Brave, Opera, Firefox (all profiles) | No |
+| 💥 Error reports | `%ProgramData%\Microsoft\Windows\WER` | Yes |
+| 📦 Windows Update cache | `C:\Windows\SoftwareDistribution\Download` | Yes |
+| ♻️ Recycle Bin | All fixed drives | No¹ |
 
-### Windows Update
-Windows Update servisi geçici olarak durdurulur, temizlik yapılır ve tekrar başlatılır.
+¹ Uses `Clear-RecycleBin`; the filesystem fallback (`$Recycle.Bin` folders) requires admin.
 
-## 📅 Zamanlanmış Görev Oluşturma
+Browser caches cover `Cache`, `Code Cache`, `GPUCache`, shader caches, and Service Worker storage per profile — bookmarks, passwords, and history are **never** touched.
 
-Haftalık otomatik temizlik için:
+## 📊 Sample Output
+
+```
+╭──────────────────────────────────────────────────────────────╮
+│                   󰃢  WINDOWS SYSTEM CLEANUP TOOL             │
+╰──────────────────────────────────────────────────────────────╯
+   Log file: C:\Users\you\AppData\Local\WindowsCleanup\CleanupLog_20260714_143000.log
+   Administrator privileges detected.
+
+╭──────────────────────────────────────────────────────────────╮
+│                    STEP 2 - TEMPORARY FILES                │
+╰──────────────────────────────────────────────────────────────╯
+   Cleaning [UserTemp]: C:\Users\you\AppData\Local\Temp (1.82 GB, 4,213 files)
+   Completed [UserTemp]: C:\Users\you\AppData\Local\Temp
+
+╭──────────────────────────────────────────────────────────────╮
+│                        CLEANUP REPORT                       │
+╰──────────────────────────────────────────────────────────────╯
+   Estimated space freed : 3.47 GB
+   Files discovered      : 12,847
+   Targets processed     : 38
+   Delete failures       : 0
+   Duration              : 2 minute(s) 34 second(s)
+```
+
+## 📝 Logging
+
+Each run writes a timestamped log to:
+
+```
+%LOCALAPPDATA%\WindowsCleanup\CleanupLog_YYYYMMDD_HHMMSS.log
+```
+
+The log lives outside every cleanup target, so the script can never delete its own log. It contains every action, all soft errors with full exception details, and the final summary.
+
+## 📅 Scheduled Weekly Cleanup
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute "PowerShell.exe" `
-    -Argument "-ExecutionPolicy Bypass -File C:\Scripts\WindowsCleanup.ps1"
+    -Argument "-NoProfile -ExecutionPolicy Bypass -File C:\Scripts\WindowsCleanup.ps1 -AssumeYes -SkipCleanMgr"
 
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 3AM
 
@@ -82,34 +114,24 @@ Register-ScheduledTask -TaskName "WeeklyCleanup" `
     -Action $action -Trigger $trigger -RunLevel Highest
 ```
 
-## 🔧 Sorun Giderme 
+> ⚠️ `-AssumeYes` also closes running browsers. Schedule it for a time when you're not browsing, or add `-SkipBrowserClose`.
 
-**"Script Çalıştırma Devre Dışı" Hatası:**
+## 🔧 Troubleshooting
+
+**"Running scripts is disabled on this system"**
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 ```
 
-**"Erişim Engellendi" Hatası:**
-- PowerShell'i yönetici olarak açın
-- Tarayıcıları kapatın ve tekrar deneyin
+**"Access denied" on some targets**
+Run elevated (accept the UAC prompt) and close browsers first. Non-elevated runs skip protected system folders by design.
 
-**Log Dosyası Konumu:**
-```powershell
-$env:TEMP\CleanupLog_*.txt
-```
+**Icons look like boxes (□)**
+Your terminal font isn't a Nerd Font. Install one (e.g. *CaskaydiaCove Nerd Font*) or ignore it — functionality is unaffected.
 
-## 📋 Gereksinimler 
+**Some files survive the cleanup**
+Locked files held by running processes are retried, then skipped and reported as soft errors. They usually disappear on the next run after a reboot.
 
-- Windows 10/11 veya Windows Server 2016+
-- PowerShell 5.1 veya üzeri
-- Yönetici (Administrator) yetkisi
+## 📄 License
 
-## 🆕 v3.0 Yenilikleri
-
-- ✅ Kullanıcı onay sistemi
-- ✅ Detaylı loglama ve raporlama
-- ✅ Temizlenen alan hesaplama
-- ✅ Otomatik tarayıcı yönetimi
-- ✅ Windows Update servis kontrolü
-- ✅ İşlem süresi takibi
-- ✅ Gelişmiş hata yönetimi
+[GPL-3.0](LICENSE)
