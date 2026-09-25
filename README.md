@@ -1,138 +1,119 @@
-# 🧹 WindowsCleanup
+# WindowsCleanup
 
-A PowerShell cleanup tool for Windows that removes temporary files, browser caches, and system leftovers — safely. No hard exits, no red walls of errors: every failure is caught, logged, retried, and reported at the end.
+A Windows cleanup script with preview mode, category selection, and local HTML/JSON reports. It removes temporary files and selected caches, retries failed deletions, and reports recoverable errors without abandoning the run.
 
-## ✨ Features
+The standalone report uses [Material 3](https://m3.material.io/) color roles, rounded cards, responsive layouts, accessible native controls, and automatic light/dark themes. It works offline without a font download, JavaScript, or external dependencies.
 
-- 🛡️ **Soft-error handling** — the script never dies mid-run; failures are collected and summarized
-- 🔁 **Self-heal deletes** — retries locked files, strips restrictive attributes, and falls back to a quarantine-rename delete
-- 🌐 **Browser aware** — gracefully closes Chrome, Edge, Firefox, Opera, and Brave before clearing their caches
-- ⚙️ **Service safe** — stops Windows Update services for cache cleanup and always restores them afterwards
-- 🔐 **Elevation friendly** — offers a UAC relaunch when not elevated; without admin rights it simply skips protected targets
-- 📊 **Honest statistics** — freed space is measured before cleaning and re-measured when deletes fail, so numbers stay accurate
-- 📝 **Full logging** — every action lands in a timestamped log file kept safely outside the cleaned folders
-- 💎 **Pretty console output** — colored, icon-decorated output (uses [Nerd Font](https://www.nerdfonts.com/) glyphs; falls back to plain text on other fonts)
+## Requirements
 
-## 📋 Requirements
+- Windows 10/11 or Windows Server 2016+
+- Windows PowerShell 5.1 or PowerShell 7
+- Administrator rights recommended for protected system categories
 
-- Windows 10 / 11 or Windows Server 2016+
-- PowerShell 5.1 or newer (PowerShell 7 works too)
-- Administrator rights recommended — not required (protected targets are skipped without them)
-- Optional: a Nerd Font terminal font for the icons
-
-## 🚀 Quick Start
+## Run
 
 ```powershell
-git clone https://github.com/PekSec/WindowsCleanup.git
-cd WindowsCleanup
 .\WindowsCleanup.ps1
+
+# Measure first: no deletion, browser shutdown, service changes, or UAC request.
+.\WindowsCleanup.ps1 -Preview -AssumeYes
+
+# Select categories, including the new opt-in caches.
+.\WindowsCleanup.ps1 -Categories UserTemp,CrashDumps,DirectXShaderCache,OperaGXCache
+
+# Scheduled/unattended run: no browser opens when finished.
+.\WindowsCleanup.ps1 -AssumeYes -SkipCleanMgr -SkipElevationRequest
+
+# Custom output folder and no automatic report opening.
+.\WindowsCleanup.ps1 -ReportDirectory 'D:\Cleanup Reports' -NoOpenReport
 ```
 
-The script asks for confirmation before cleaning, offers a UAC elevation prompt when not running as Administrator, and asks separately before touching Prefetch or launching the Disk Cleanup wizard.
+Interactive cleanup asks for confirmation and offers UAC elevation when needed. Prefetch requires `-IncludePrefetch` or a separate interactive opt-in, even when selected with `-Categories`. `-Categories` replaces the default selection; omitted categories are not cleaned. Preview writes reports and a log, and labels measured bytes as **cleanable**, never freed.
 
-For a fully unattended run:
+## Reports and completion
+
+Each run saves matching files under:
+
+```text
+%LOCALAPPDATA%\WindowsCleanup\Reports\
+  CleanupReport_YYYYMMDD_HHMMSS_fff_<run-id>.html
+  CleanupReport_YYYYMMDD_HHMMSS_fff_<run-id>.json
+  CleanupReport_YYYYMMDD_HHMMSS_fff_<run-id>.log
+```
+
+After both reports are saved, the HTML opens in the default browser, the terminal prints both absolute report paths, and the script exits without waiting for Enter. `-AssumeYes` and `-NoOpenReport` suppress HTML opening. A failed browser launch leaves the reports available and prints a warning.
+
+- Exit **0**: completed, completed with recoverable warnings, preview, cancellation, or successful UAC handoff. The report distinguishes these outcomes; cancellation is never labeled completed.
+- Exit **1**: fatal workflow failure, unsupported platform, unsafe/unwritable report directory, or failure to save both reports. A fatal workflow attempts to save a failure report after restoring services.
+
+Reports include timestamps, selected categories, numeric byte totals, per-target outcomes and skip reasons, measurement completeness, errors, and report paths. JSON has `SchemaVersion: 1` and top-level `RunId`, `StartedAt`, `FinishedAt`, `DurationSeconds`, `Mode`, `Status`, `IsAdministrator`, `SelectedCategories`, `Stats`, `Results`, `Errors`, and `Reports` fields. Timestamps use ISO 8601 with offsets; sizes are bytes and durations are seconds. The HTML renders the same results and links to the matching JSON and log.
+
+Space figures are estimates based on measured file sizes, not free-space readings. Failed deletions trigger remeasurement; incomplete remeasurement conservatively credits zero reclaimed bytes. Recycle Bin and Disk Cleanup wizard savings are not measured. Missing folders, unselected categories, and administrator-only skips remain visible in the report. Reports contain local paths and exception details; review them before sharing.
+
+## Parameters
+
+| Parameter | Default | Behavior |
+| --- | --- | --- |
+| `-Preview` | Off | Measure selected targets; do not perform cleanup or change processes/services. |
+| `-Categories` | Existing categories below | Clean only these category names; comma-separated in PowerShell. |
+| `-ReportDirectory` | `%LOCALAPPDATA%\WindowsCleanup\Reports` | Folder for HTML, JSON, and log. Unsafe paths are rejected before cleanup. |
+| `-NoOpenReport` | Off | Save reports without opening HTML. |
+| `-AssumeYes` | Off | Confirm cleanup and elevation automatically; suppress optional prompts, Disk Cleanup wizard, and HTML opening. Prefetch still requires `-IncludePrefetch`. |
+| `-IncludePrefetch` | Off | Opt into Prefetch cleanup when that category is selected. |
+| `-SkipBrowserClose` | Off | Leave browsers running; locked caches may remain. |
+| `-SkipCleanMgr` | Off | Do not offer the Disk Cleanup wizard. |
+| `-OpenLog` | Off | Explicitly open the diagnostic log in Notepad, including with `-AssumeYes`. |
+| `-SkipElevationRequest` | Off | Use current privileges and skip protected targets when needed. |
+| `-DeleteRetryCount` | `2` | Retries per failed file or empty-directory deletion, from 0 to 10. |
+| `-DeleteRetryDelayMs` | `500` | Delay between retries, from 0 to 60000 ms. |
+| `-BrowserCloseTimeoutMs` | `2500` | Grace period before remaining relevant browser processes are force-closed. |
+
+When launching from `cmd.exe`, use `powershell.exe -Command "& '.\WindowsCleanup.ps1' -Categories UserTemp,CrashDumps"` for array arguments. UAC relaunch preserves category arrays, paths containing spaces, and explicit false switches.
+
+## Cleanup categories
+
+| Category | Locations / operation | Admin | Selection |
+| --- | --- | --- | --- |
+| `UserTemp` | `%TEMP%`, `%LOCALAPPDATA%\Temp` | No | Default |
+| `WindowsTemp` | `%WINDIR%\Temp` | Yes | Default |
+| `Prefetch` | `%WINDIR%\Prefetch` | Yes | Default selection; separate opt-in |
+| `RecentItems` | `%APPDATA%\Microsoft\Windows\Recent` | No | Default |
+| `BrowserCache` | Chrome, Edge, Brave, Firefox, Opera cache directories across recognized profiles | No | Default |
+| `WindowsErrorReporting` | `%ProgramData%\Microsoft\Windows\WER\{ReportArchive,ReportQueue,Temp}` | Yes | Default |
+| `WindowsUpdateDownloadCache` | `%WINDIR%\SoftwareDistribution\Download` | Yes | Default |
+| `RecycleBin` | Native `Clear-RecycleBin`, current user's bins | No | Default |
+| `DiskCleanup` | Optional Windows Disk Cleanup wizard | Depends on selected operations | Default selection; separate interactive opt-in |
+| `CrashDumps` | `%LOCALAPPDATA%\CrashDumps` | No | Explicit selection only |
+| `DirectXShaderCache` | `%LOCALAPPDATA%\D3DSCache` | No | Explicit selection only |
+| `OperaGXCache` | Cache subdirectories under local/roaming `Opera Software\Opera GX Stable` | No | Explicit selection only |
+
+Browser cleanup covers recognized cache folders, including shader and Service Worker caches. Bookmarks, passwords, history, installations, and general application data are preserved. Shader caches rebuild on demand; removing crash dumps discards those diagnostic files.
+
+## Safety and performance
+
+Targets are deduplicated across a run. Deletion is sequential, with no forced garbage collection during retries. Ordinary files are measured before cleanup; failed targets are measured again. Links/junctions and paths with linked ancestors are skipped during measurement and deletion. Directories are deleted only after processing their children, without recursive deletion or recursive attribute changes.
+
+The output directory cannot overlap any discovered cleanup target, even an unselected one, or use a linked ancestor or Recycle Bin path. There is no temporary-folder fallback. The directory is protected from subsequent cleanup, including attempts to remove its ancestors.
+
+Only selected browser categories trigger browser closing. Opera and Opera GX share a process name, so selecting either may close both. Windows Update cleanup checks that both `wuauserv` and `bits` stopped successfully, then restores services that were originally running in `finally`. Non-admin runs do not attempt service changes. Recycle Bin failures are reported; there is no filesystem fallback that could erase other users' bins. Failed deletes stay in place, without quarantine renaming.
+
+`-AssumeYes` can force-close browsers. For a scheduled run, add `-SkipBrowserClose` to keep them open:
 
 ```powershell
-.\WindowsCleanup.ps1 -AssumeYes -SkipCleanMgr
-```
-
-## 🧰 Parameters
-
-| Parameter                | Type   | Default | Description                                                                                                        |
-| ------------------------ | ------ | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| `-AssumeYes`             | switch | off     | Answer _yes_ to all prompts (unattended mode); skips the interactive Disk Cleanup wizard and the "open log" prompt |
-| `-IncludePrefetch`       | switch | off     | Clean `C:\Windows\Prefetch` without asking                                                                         |
-| `-SkipBrowserClose`      | switch | off     | Don't close running browsers (their caches may then be locked)                                                     |
-| `-SkipCleanMgr`          | switch | off     | Never offer the Windows Disk Cleanup wizard                                                                        |
-| `-OpenLog`               | switch | off     | Open the log file in Notepad when finished                                                                         |
-| `-SkipElevationRequest`  | switch | off     | Don't offer the UAC relaunch; run with current privileges                                                          |
-| `-DeleteRetryCount`      | int    | `2`     | Retries per failed delete before the quarantine fallback                                                           |
-| `-DeleteRetryDelayMs`    | int    | `500`   | Delay between delete retries                                                                                       |
-| `-BrowserCloseTimeoutMs` | int    | `2500`  | Grace period before browsers are force-closed                                                                      |
-
-## 🗑️ What Gets Cleaned
-
-| Category                | Location                                           | Admin needed |
-| ----------------------- | -------------------------------------------------- | ------------ |
-| 🗂️ User temp files      | `%TEMP%`, `%LOCALAPPDATA%\Temp`                    | No           |
-| 🖥️ System temp files    | `C:\Windows\Temp`                                  | Yes          |
-| 🚀 Prefetch (optional)  | `C:\Windows\Prefetch`                              | Yes          |
-| 🕘 Recent items         | `%APPDATA%\Microsoft\Windows\Recent`               | No           |
-| 🌐 Browser caches       | Chrome, Edge, Brave, Opera, Firefox (all profiles) | No           |
-| 💥 Error reports        | `%ProgramData%\Microsoft\Windows\WER`              | Yes          |
-| 📦 Windows Update cache | `C:\Windows\SoftwareDistribution\Download`         | Yes          |
-| ♻️ Recycle Bin          | All fixed drives                                   | No¹          |
-
-¹ Uses `Clear-RecycleBin`; the filesystem fallback (`$Recycle.Bin` folders) requires admin.
-
-Browser caches cover `Cache`, `Code Cache`, `GPUCache`, shader caches, and Service Worker storage per profile — bookmarks, passwords, and history are **never** touched.
-
-## 📊 Sample Output
-
-```
-╭──────────────────────────────────────────────────────────────╮
-│                   󰃢  WINDOWS SYSTEM CLEANUP TOOL             │
-╰──────────────────────────────────────────────────────────────╯
-   Log file: C:\Users\you\AppData\Local\WindowsCleanup\CleanupLog_20260714_143000.log
-   Administrator privileges detected.
-
-╭──────────────────────────────────────────────────────────────╮
-│                    STEP 2 - TEMPORARY FILES                  │
-╰──────────────────────────────────────────────────────────────╯
-   Cleaning [UserTemp]: C:\Users\you\AppData\Local\Temp (1.82 GB, 4,213 files)
-   Completed [UserTemp]: C:\Users\you\AppData\Local\Temp
-
-╭──────────────────────────────────────────────────────────────╮
-│                        CLEANUP REPORT                        │
-╰──────────────────────────────────────────────────────────────╯
-   Estimated space freed : 3.47 GB
-   Files discovered      : 12,847
-   Targets processed     : 38
-   Delete failures       : 0
-   Duration              : 2 minute(s) 34 second(s)
-```
-
-## 📝 Logging
-
-Each run writes a timestamped log to:
-
-```
-%LOCALAPPDATA%\WindowsCleanup\CleanupLog_YYYYMMDD_HHMMSS.log
-```
-
-The log lives outside every cleanup target, so the script can never delete its own log. It contains every action, all soft errors with full exception details, and the final summary.
-
-## 📅 Scheduled Weekly Cleanup
-
-```powershell
-$action = New-ScheduledTaskAction -Execute "PowerShell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File C:\Scripts\WindowsCleanup.ps1 -AssumeYes -SkipCleanMgr"
-
+$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File C:\Scripts\WindowsCleanup.ps1 -AssumeYes -SkipCleanMgr -SkipElevationRequest -SkipBrowserClose'
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 3AM
-
-Register-ScheduledTask -TaskName "WeeklyCleanup" `
-    -Action $action -Trigger $trigger -RunLevel Highest
+Register-ScheduledTask -TaskName 'WeeklyCleanup' -Action $action -Trigger $trigger -RunLevel Highest
 ```
 
-> ⚠️ `-AssumeYes` also closes running browsers. Schedule it for a time when you're not browsing, or add `-SkipBrowserClose`.
-
-## 🔧 Troubleshooting
-
-**"Running scripts is disabled on this system"**
+## Verification
 
 ```powershell
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+powershell.exe -NoProfile -File .\tests\Regression.ps1
+pwsh -NoProfile -File .\tests\Regression.ps1
 ```
 
-**"Access denied" on some targets**
-Run elevated (accept the UAC prompt) and close browsers first. Non-elevated runs skip protected system folders by design.
+The dependency-free checks load only function definitions, use temporary fixtures, and replace OS actions with stubs. They exercise preview, discovery, category selection, report consistency/escaping, protected paths, linked directories, partial deletion, service restoration, elevation arguments, and completion errors. Run on both Windows PowerShell 5.1 and PowerShell 7 before a Windows release; fixture checks on Linux do not verify actual UAC, services, browser shutdown, or Windows file locking.
 
-**Icons look like boxes (□)**
-Your terminal font isn't a Nerd Font. Install one (e.g. _CaskaydiaCove Nerd Font_) or ignore it — functionality is unaffected.
-
-**Some files survive the cleanup**
-Locked files held by running processes are retried, then skipped and reported as soft errors. They usually disappear on the next run after a reboot.
-
-## 📄 License
+## License
 
 [GPL-3.0](LICENSE)
